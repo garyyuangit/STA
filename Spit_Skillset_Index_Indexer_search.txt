@@ -1,0 +1,237 @@
+----------- Split Skillset  ---------------------------------
+
+{
+  "@odata.etag": "\"0x8DDEFA754573400\"",
+  "name": "splitonly-skillset",
+  "description": "Enrich the content field with chunking and embeddings",
+  "skills": [
+    {
+      "@odata.type": "#Microsoft.Skills.Text.SplitSkill",
+      "name": "chunkText",
+      "context": "/document",
+      "defaultLanguageCode": "en",
+      "textSplitMode": "pages",
+      "maximumPageLength": 2000,
+      "pageOverlapLength": 0,
+      "maximumPagesToTake": 0,
+      "unit": "characters",
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/content",
+          "inputs": []
+        }
+      ],
+      "outputs": [
+        {
+          "name": "textItems",
+          "targetName": "chunks"
+        }
+      ]
+    }
+  ]
+}
+
+
+----------- rag-ready-index:  -----------------------------------------------------
+
+{
+  "@odata.etag": "\"0x8DDEFEEA87E4DE0\"",
+  "name": "rag-ready-index",
+  "fields": [
+    {
+      "name": "id",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": true,
+      "retrievable": true,
+      "stored": true,
+      "sortable": false,
+      "facetable": false,
+      "key": true,
+      "synonymMaps": []
+    },
+    {
+      "name": "parent_id",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "retrievable": true,
+      "stored": true,
+      "sortable": false,
+      "facetable": false,
+      "key": false,
+      "synonymMaps": []
+    },
+    {
+      "name": "chunk",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": false,
+      "retrievable": true,
+      "stored": true,
+      "sortable": false,
+      "facetable": false,
+      "key": false,
+      "synonymMaps": []
+    },
+    {
+      "name": "filepath",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": true,
+      "retrievable": true,
+      "stored": true,
+      "sortable": true,
+      "facetable": false,
+      "key": false,
+      "synonymMaps": []
+    },
+    {
+      "name": "url",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": true,
+      "retrievable": true,
+      "stored": true,
+      "sortable": false,
+      "facetable": false,
+      "key": false,
+      "synonymMaps": []
+    },
+    {
+      "name": "sta_type",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": true,
+      "retrievable": true,
+      "stored": true,
+      "sortable": false,
+      "facetable": false,
+      "key": false,
+      "synonymMaps": []
+    }
+  ],
+  "scoringProfiles": [],
+  "suggesters": [],
+  "analyzers": [],
+  "normalizers": [],
+  "tokenizers": [],
+  "tokenFilters": [],
+  "charFilters": [],
+  "similarity": {
+    "@odata.type": "#Microsoft.Azure.Search.BM25Similarity"
+  }
+}
+
+----------- rag-ready-indexer:  -----------------------------------------------------
+
+{
+  "@odata.context": "https://your-azure-ai-search.search.windows.net/$metadata#indexers/$entity",
+  "@odata.etag": "\"0x8DDEFF70F8498A6\"",
+  "name": "rag-ready-indexer",
+  "description": null,
+  "dataSourceName": "gy-cosmos-db-01",
+  "skillsetName": "splitonly-skillset",
+  "targetIndexName": "rag-ready-index",
+  "disabled": null,
+  "schedule": null,
+  "parameters": null,
+  "fieldMappings": [],
+  "outputFieldMappings": [
+    {
+      "sourceFieldName": "/document/id",
+      "targetFieldName": "parent_id",
+      "mappingFunction": null
+    },
+    {
+      "sourceFieldName": "/document/url",
+      "targetFieldName": "url",
+      "mappingFunction": null
+    },
+    {
+      "sourceFieldName": "/document/chunks/*",
+      "targetFieldName": "chunk",
+      "mappingFunction": null
+    },
+    {
+      "sourceFieldName": "/document/chunks/*/textItems/id",
+      "targetFieldName": "id",
+      "mappingFunction": null
+    }
+  ],
+  "cache": null,
+  "encryptionKey": null
+}
+
+--------- Search client ------------------
+
+import os
+import requests
+import json
+import urllib.parse
+
+# Get search service endpoint and admin key from environment variables
+# IMPORTANT: Replace these with your actual endpoint and key, or set them as environment variables.
+service_endpoint = os.environ.get("SEARCH_SERVICE_ENDPOINT")
+admin_key = os.environ.get("SEARCH_ADMIN_KEY")
+
+if not service_endpoint or not admin_key:
+    raise ValueError("Please set the environment variables for SEARCH_SERVICE_ENDPOINT and SEARCH_ADMIN_KEY")
+
+# Define the target index and API version
+target_index_name = "rag-ready-index"
+api_version = "2024-05-01-preview"
+
+# Define the search query
+search_text = "your search query here"
+
+# Fields to retrieve in the search results
+# 'id' is the unique chunk ID, 'chunk' is the chunk text, and 'parent_id' links back to the original document.
+# Note: '/document/chunks/*/textItems/id' from the indexer payload becomes 'id' in the index itself.
+select_fields = "id,chunk,parent_id"
+
+# Construct the URL for the REST API call
+# We URL-encode the search text to handle special characters.
+encoded_search_text = urllib.parse.quote(search_text)
+url = f"{service_endpoint}/indexes/{target_index_name}/docs?api-version={api_version}&search={encoded_search_text}&$select={select_fields}"
+
+# Set the headers for the request
+headers = {
+    "Content-Type": "application/json",
+    "api-key": admin_key
+}
+
+print(f"Executing search query on '{target_index_name}'...")
+print(f"Searching for: '{search_text}'")
+try:
+    # Use a GET request for a search query
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()  # This will raise an HTTPError for bad responses
+    
+    search_results = response.json()
+    
+    print("Search results retrieved successfully.")
+    
+    # Process and display the results
+    if search_results.get("value"):
+        for doc in search_results["value"]:
+            # The id field is what you're looking for as the chunk ID
+            chunk_id = doc.get("id")
+            chunk_text = doc.get("chunk")
+            parent_id = doc.get("parent_id")
+            
+            print("-" * 20)
+            print(f"Chunk ID: {chunk_id}")
+            print(f"Parent Document ID: {parent_id}")
+            print(f"Chunk Content: {chunk_text}")
+    else:
+        print("No results found for the query.")
+
+except requests.exceptions.RequestException as ex:
+    print(f"An error occurred: {ex}")
+    if ex.response:
+        print(f"Response status code: {ex.response.status_code}")
+        print(f"Response content: {ex.response.text}")
+except Exception as ex:
+    print(f"An unexpected error occurred: {ex}")
